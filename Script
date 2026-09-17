@@ -1,0 +1,1169 @@
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+ 
+local station = script.Parent
+ 
+local rollPart = station:WaitForChild("Roll")
+local buyPart = station:WaitForChild("Buy")
+local skipPart = station:WaitForChild("Skip")
+local display = station:WaitForChild("BlockDisplay")
+ 
+local collection = ReplicatedStorage:WaitForChild("Collection")
+ 
+--------------------------------------------------
+-- SETTINGS
+--------------------------------------------------
+ 
+local CLICK_DISTANCE = 25
+ 
+local ROLL_STEPS = 36
+ 
+local START_SPEED = 0.045
+local END_SPEED = 0.16
+ 
+--------------------------------------------------
+-- RARITIES
+--------------------------------------------------
+ 
+local RARITIES = {
+{Name = "Common", Chance = 50},
+{Name = "Uncommon", Chance = 25},
+{Name = "Rare", Chance = 12},
+{Name = "Epic", Chance = 6},
+{Name = "Legendary", Chance = 3},
+{Name = "Mythical", Chance = 2},
+{Name = "Secret", Chance = 1.5},
+{Name = "Divine", Chance = 0.5},
+}
+ 
+--------------------------------------------------
+-- SOUNDS
+--------------------------------------------------
+ 
+local TAP_SOUND_ID = "rbxassetid://113397864512278"
+local WHOOSH_SOUND_ID = "rbxassetid://137081214744553"
+local ROLL_SOUND_ID = "rbxassetid://70482547486758"
+ 
+--------------------------------------------------
+-- VARIABLES
+--------------------------------------------------
+ 
+local currentTool = nil
+local currentRarity = nil
+ 
+local rolling = false
+local busy = false
+ 
+local displayedObject = nil
+ 
+--------------------------------------------------
+-- CLICK DETECTORS
+--------------------------------------------------
+ 
+local function getClickDetector(part)
+    
+    local detector = part:FindFirstChildOfClass("ClickDetector")
+    
+    if not detector then
+        detector = Instance.new("ClickDetector")
+        detector.Parent = part
+    end
+    
+    detector.MaxActivationDistance = CLICK_DISTANCE
+    
+    return detector
+end
+ 
+local rollClick = getClickDetector(rollPart)
+local buyClick = getClickDetector(buyPart)
+local skipClick = getClickDetector(skipPart)
+ 
+--------------------------------------------------
+-- SOUND
+--------------------------------------------------
+ 
+local function playSound(
+    soundId,
+    volume,
+    playbackSpeed,
+    looped
+    )
+    
+    local sound = Instance.new("Sound")
+    
+    sound.SoundId = soundId
+    sound.Volume = volume or 0.5
+    sound.PlaybackSpeed = playbackSpeed or 1
+    sound.Looped = looped or false
+    
+    sound.Parent = station
+    sound:Play()
+    
+    if not looped then
+        Debris:AddItem(sound, 5)
+    end
+    
+    return sound
+end
+ 
+--------------------------------------------------
+-- BUTTON ANIMATION
+--------------------------------------------------
+ 
+local function pressButton(part)
+    
+    local originalSize = part.Size
+    local smallerSize = originalSize * 0.92
+    
+    local downTween = TweenService:Create(
+    part,
+    TweenInfo.new(
+    0.06,
+    Enum.EasingStyle.Quad,
+    Enum.EasingDirection.Out
+    ),
+    {
+    Size = smallerSize
+    }
+    )
+    
+    local upTween = TweenService:Create(
+    part,
+    TweenInfo.new(
+    0.09,
+    Enum.EasingStyle.Back,
+    Enum.EasingDirection.Out
+    ),
+    {
+    Size = originalSize
+    }
+    )
+    
+    downTween:Play()
+    downTween.Completed:Wait()
+    
+    upTween:Play()
+end
+ 
+--------------------------------------------------
+-- GET ALL TOOLS
+--------------------------------------------------
+ 
+local function getAllTools()
+    
+    local tools = {}
+    
+    for _, rarityData in ipairs(RARITIES) do
+        
+        local rarityFolder =
+        collection:FindFirstChild(rarityData.Name)
+        
+        if rarityFolder then
+            
+            for _, item in ipairs(rarityFolder:GetChildren()) do
+                
+                if item:IsA("Tool") then
+                    table.insert(tools, item)
+                end
+                
+            end
+            
+        end
+        
+    end
+    
+    return tools
+end
+ 
+--------------------------------------------------
+-- CHOOSE RARITY
+--------------------------------------------------
+ 
+local function chooseRarity()
+    
+    local randomNumber = math.random() * 100
+    
+    local total = 0
+    
+    for _, rarityData in ipairs(RARITIES) do
+        
+        total += rarityData.Chance
+        
+        if randomNumber <= total then
+            return rarityData.Name
+        end
+        
+    end
+    
+    return "Common"
+end
+ 
+--------------------------------------------------
+-- GET TOOLS FROM RARITY
+--------------------------------------------------
+ 
+local function getToolsFromRarity(rarityName)
+    
+    local result = {}
+    
+    local folder =
+    collection:FindFirstChild(rarityName)
+    
+    if not folder then
+        return result
+    end
+    
+    for _, item in ipairs(folder:GetChildren()) do
+        
+        if item:IsA("Tool") then
+            table.insert(result, item)
+        end
+        
+    end
+    
+    return result
+end
+ 
+--------------------------------------------------
+-- CHOOSE FINAL TOOL
+--------------------------------------------------
+ 
+local function chooseFinalTool()
+    
+    local rarity = chooseRarity()
+    
+    local rarityTools =
+    getToolsFromRarity(rarity)
+    
+    if #rarityTools == 0 then
+        
+        local allTools =
+        getAllTools()
+        
+        if #allTools == 0 then
+            return nil, nil
+        end
+        
+        local randomTool =
+        allTools[
+        math.random(
+        1,
+        #allTools
+        )
+        ]
+        
+        return randomTool, rarity
+    end
+    
+    local selectedTool =
+    rarityTools[
+    math.random(
+    1,
+    #rarityTools
+    )
+    ]
+    
+    return selectedTool, rarity
+end
+ 
+--------------------------------------------------
+-- CLEAR DISPLAY
+--------------------------------------------------
+ 
+local function clearDisplay()
+    
+    if displayedObject then
+        displayedObject:Destroy()
+        displayedObject = nil
+    end
+    
+    for _, child in ipairs(display:GetChildren()) do
+        
+        if child:IsA("BasePart")
+            or child:IsA("Model")
+            or child:IsA("Tool") then
+            
+            child:Destroy()
+            
+        end
+        
+    end
+end
+ 
+--------------------------------------------------
+-- FIND HANDLE
+--------------------------------------------------
+ 
+local function findHandle(tool)
+    
+    local handle =
+    tool:FindFirstChild("Handle")
+    
+    if handle
+        and handle:IsA("BasePart") then
+        
+        return handle
+    end
+    
+    for _, object in ipairs(tool:GetDescendants()) do
+        
+        if object:IsA("BasePart") then
+            return object
+        end
+        
+    end
+    
+    return nil
+end
+ 
+--------------------------------------------------
+-- SHOW TOOL
+--------------------------------------------------
+ 
+local function showTool(tool)
+    
+    if not tool then
+        return nil
+    end
+    
+    clearDisplay()
+    
+    local handle =
+    findHandle(tool)
+    
+    if not handle then
+        
+        warn(
+        "[RollSystem] Handle not found: "
+        .. tool.Name
+        )
+        
+        return nil
+    end
+    
+    --------------------------------------------------
+    -- EXACT HANDLE CLONE
+    --------------------------------------------------
+    
+    local clone =
+    handle:Clone()
+    
+    --------------------------------------------------
+    -- REMOVE BILLBOARD DURING ROLL
+    --------------------------------------------------
+    
+    for _, object in ipairs(clone:GetDescendants()) do
+        
+        if object:IsA("BillboardGui") then
+            object:Destroy()
+        end
+        
+    end
+    
+    --------------------------------------------------
+    -- PHYSICS
+    --------------------------------------------------
+    
+    clone.Anchored = true
+    clone.CanCollide = false
+    clone.CanTouch = false
+    clone.CanQuery = false
+    
+    --------------------------------------------------
+    -- NO SIZE CHANGE
+    --------------------------------------------------
+    
+    clone.CFrame =
+    CFrame.new(
+    display.Position
+    + Vector3.new(
+    0,
+    2.5,
+    0
+    )
+    )
+    
+    clone.Parent = display
+    
+    displayedObject = clone
+    
+    return clone
+end
+ 
+--------------------------------------------------
+-- SHOW NEXT BLOCK
+--------------------------------------------------
+ 
+local function showNextBlock(tool)
+    
+    if not tool then
+        return
+    end
+    
+    local object =
+    showTool(tool)
+    
+    if not object then
+        return
+    end
+    
+    local startCFrame =
+    object.CFrame
+    
+    local moveTween =
+    TweenService:Create(
+    object,
+    TweenInfo.new(
+    0.07,
+    Enum.EasingStyle.Quad,
+    Enum.EasingDirection.Out
+    ),
+    {
+    CFrame =
+    startCFrame
+    * CFrame.new(
+    0,
+    0.15,
+    0
+    )
+    * CFrame.Angles(
+    0,
+    math.rad(12),
+    0
+    )
+    }
+    )
+    
+    moveTween:Play()
+    moveTween.Completed:Wait()
+    
+    if object
+        and object.Parent then
+        
+        local returnTween =
+        TweenService:Create(
+        object,
+        TweenInfo.new(
+        0.05,
+        Enum.EasingStyle.Quad,
+        Enum.EasingDirection.In
+        ),
+        {
+        CFrame = startCFrame
+        }
+        )
+        
+        returnTween:Play()
+    end
+end
+ 
+--------------------------------------------------
+-- FINAL BILLBOARD
+--------------------------------------------------
+ 
+local function addFinalBillboard(
+    tool,
+    displayedHandle
+    )
+    
+    if not tool then
+        return
+    end
+    
+    if not displayedHandle then
+        return
+    end
+    
+    local billboard =
+    tool:FindFirstChild(
+    "BillboardGui",
+    true
+    )
+    
+    if not billboard then
+        
+        warn(
+        "[RollSystem] BillboardGui not found inside Tool: "
+        .. tool.Name
+        )
+        
+        return
+    end
+    
+    --------------------------------------------------
+    -- EXACT BILLBOARD COPY
+    -- TEXT IS NOT CHANGED
+    --------------------------------------------------
+    
+    local billboardClone =
+    billboard:Clone()
+    
+    billboardClone.Enabled = true
+    billboardClone.Parent = displayedHandle
+end
+ 
+--------------------------------------------------
+-- FINAL BOUNCE
+--------------------------------------------------
+ 
+local function finalBounce(object)
+    
+    if not object then
+        return
+    end
+    
+    if not object.Parent then
+        return
+    end
+    
+    local originalCFrame =
+    object.CFrame
+    
+    local upTween =
+    TweenService:Create(
+    object,
+    TweenInfo.new(
+    0.18,
+    Enum.EasingStyle.Back,
+    Enum.EasingDirection.Out
+    ),
+    {
+    CFrame =
+    originalCFrame
+    * CFrame.new(
+    0,
+    0.45,
+    0
+    )
+    * CFrame.Angles(
+    0,
+    math.rad(360),
+    0
+    )
+    }
+    )
+    
+    upTween:Play()
+    upTween.Completed:Wait()
+    
+    if not object.Parent then
+        return
+    end
+    
+    local downTween =
+    TweenService:Create(
+    object,
+    TweenInfo.new(
+    0.14,
+    Enum.EasingStyle.Bounce,
+    Enum.EasingDirection.Out
+    ),
+    {
+    CFrame = originalCFrame
+    }
+    )
+    
+    downTween:Play()
+    downTween.Completed:Wait()
+end
+ 
+--------------------------------------------------
+-- PURCHASE NOTIFICATION
+--
+-- IMPORTANT:
+-- TEXT LANG ANG BINABAGO.
+-- HINDI GINAGALAW ANG:
+-- BackgroundColor
+-- Size
+-- Position
+-- Font
+-- TextSize
+-- UIStroke
+-- UIGradient
+-- AT IBA PANG UI SETTINGS
+--------------------------------------------------
+ 
+local function showNotification(player, message)
+    
+    local playerGui =
+    player:FindFirstChild("PlayerGui")
+    
+    if not playerGui then
+        return
+    end
+    
+    local purchaseGui =
+    playerGui:FindFirstChild("PurchaseGui")
+    
+    if not purchaseGui then
+        warn("PurchaseGui not found!")
+        return
+    end
+    
+    local frame =
+    purchaseGui:FindFirstChild("NotificationFrame")
+    
+    if not frame then
+        warn("NotificationFrame not found!")
+        return
+    end
+    
+    local label =
+    frame:FindFirstChild("MessageLabel")
+    
+    if not label then
+        warn("MessageLabel not found!")
+        return
+    end
+    
+    --------------------------------------------------
+    -- ONLY TEXT IS CHANGED
+    --------------------------------------------------
+    
+    label.Text = message
+    
+    --------------------------------------------------
+    -- SHOW
+    --------------------------------------------------
+    
+    frame.Visible = true
+    
+    --------------------------------------------------
+    -- WAIT
+    --------------------------------------------------
+    
+    task.wait(1.5)
+    
+    --------------------------------------------------
+    -- HIDE
+    --------------------------------------------------
+    
+    frame.Visible = false
+end
+ 
+--------------------------------------------------
+-- ROLL
+--------------------------------------------------
+ 
+local function doRoll()
+    
+    if rolling or busy then
+        return
+    end
+    
+    rolling = true
+    busy = true
+    
+    currentTool = nil
+    currentRarity = nil
+    
+    clearDisplay()
+    
+    task.spawn(function()
+        pressButton(rollPart)
+    end)
+    
+    playSound(
+    TAP_SOUND_ID,
+    0.35,
+    1,
+    false
+    )
+    
+    task.wait(0.06)
+    
+    playSound(
+    WHOOSH_SOUND_ID,
+    0.25,
+    1,
+    false
+    )
+    
+    --------------------------------------------------
+    -- FINAL RESULT
+    --------------------------------------------------
+    
+    local finalTool,
+    finalRarity =
+    chooseFinalTool()
+    
+    if not finalTool then
+        
+        warn(
+        "[RollSystem] Walang Tool sa Collection!"
+        )
+        
+        rolling = false
+        busy = false
+        
+        return
+    end
+    
+    --------------------------------------------------
+    -- GET ALL TOOLS
+    --------------------------------------------------
+    
+    local allTools =
+    getAllTools()
+    
+    if #allTools == 0 then
+        
+        warn(
+        "[RollSystem] Walang Tools!"
+        )
+        
+        rolling = false
+        busy = false
+        
+        return
+    end
+    
+    --------------------------------------------------
+    -- ROLL SOUND
+    --------------------------------------------------
+    
+    local rollSound =
+    playSound(
+    ROLL_SOUND_ID,
+    0.16,
+    1,
+    true
+    )
+    
+    --------------------------------------------------
+    -- BUILD SEQUENCE
+    --------------------------------------------------
+    
+    local sequence = {}
+    
+    local normalSteps =
+    ROLL_STEPS - 8
+    
+    for i = 1, normalSteps do
+        
+        local index =
+        ((i - 1)
+        % #allTools)
+        + 1
+        
+        table.insert(
+        sequence,
+        allTools[index]
+        )
+        
+    end
+    
+    --------------------------------------------------
+    -- FINAL 8
+    --------------------------------------------------
+    
+    for i = 1, 8 do
+        
+        table.insert(
+        sequence,
+        finalTool
+        )
+        
+    end
+    
+    --------------------------------------------------
+    -- ROLL ANIMATION
+    --------------------------------------------------
+    
+    for i, tool in ipairs(sequence) do
+        
+        showNextBlock(tool)
+        
+        local progress =
+        (i - 1)
+        / math.max(
+        1,
+        #sequence - 1
+        )
+        
+        local delayTime =
+        START_SPEED
+        + (
+        END_SPEED
+        - START_SPEED
+        )
+        * (progress ^ 2)
+        
+        task.wait(delayTime)
+    end
+    
+    --------------------------------------------------
+    -- STOP ROLL SOUND
+    --------------------------------------------------
+    
+    if rollSound then
+        rollSound:Stop()
+        rollSound:Destroy()
+    end
+    
+    --------------------------------------------------
+    -- FINAL DISPLAY
+    --------------------------------------------------
+    
+    local finalDisplay =
+    showTool(finalTool)
+    
+    finalBounce(finalDisplay)
+    
+    --------------------------------------------------
+    -- BILLBOARD
+    --------------------------------------------------
+    
+    addFinalBillboard(
+    finalTool,
+    finalDisplay
+    )
+    
+    --------------------------------------------------
+    -- SAVE RESULT
+    --------------------------------------------------
+    
+    currentTool = finalTool
+    currentRarity = finalRarity
+    
+    rolling = false
+    busy = false
+end
+ 
+--------------------------------------------------
+-- BUY
+--------------------------------------------------
+ 
+local function doBuy(player)
+    
+    if rolling or busy then
+        return
+    end
+    
+    if not currentTool then
+        return
+    end
+    
+    busy = true
+    
+    --------------------------------------------------
+    -- BUTTON
+    --------------------------------------------------
+    
+    task.spawn(function()
+        pressButton(buyPart)
+    end)
+    
+    playSound(
+    TAP_SOUND_ID,
+    0.35,
+    1,
+    false
+    )
+    
+    --------------------------------------------------
+    -- FIND LEADERSTATS
+    --------------------------------------------------
+    
+    local leaderstats =
+    player:FindFirstChild("leaderstats")
+    
+    if not leaderstats then
+        
+        warn("leaderstats not found!")
+        
+        busy = false
+        
+        return
+    end
+    
+    --------------------------------------------------
+    -- FIND MONEY
+    --------------------------------------------------
+    
+    local money =
+    leaderstats:FindFirstChild("Money")
+    
+    if not money then
+        
+        warn("Money not found!")
+        
+        busy = false
+        
+        return
+    end
+    
+    --------------------------------------------------
+    -- FIND PRICE
+    --------------------------------------------------
+    
+    local price =
+    currentTool:FindFirstChild("Price")
+    
+    if not price then
+        
+        warn(
+        "Price not found inside "
+        .. currentTool.Name
+        )
+        
+        showNotification(
+        player,
+        "Price not found!"
+        )
+        
+        busy = false
+        
+        return
+    end
+    
+    --------------------------------------------------
+    -- CHECK PRICE TYPE
+    --------------------------------------------------
+    
+    if not price:IsA("IntValue")
+        and not price:IsA("NumberValue") then
+        
+        warn(
+        "Price must be IntValue or NumberValue!"
+        )
+        
+        showNotification(
+        player,
+        "Invalid block price!"
+        )
+        
+        busy = false
+        
+        return
+    end
+    
+    local priceAmount =
+    price.Value
+    
+    --------------------------------------------------
+    -- NOT ENOUGH CASH
+    --------------------------------------------------
+    
+    if money.Value < priceAmount then
+        
+        showNotification(
+        player,
+        "Not enough cash"
+        )
+        
+        busy = false
+        
+        return
+    end
+    
+    --------------------------------------------------
+    -- REMOVE MONEY
+    --------------------------------------------------
+    
+    money.Value =
+    money.Value - priceAmount
+    
+    --------------------------------------------------
+    -- CLONE TOOL
+    --------------------------------------------------
+    
+    local toolToGive =
+    currentTool:Clone()
+    
+    local object =
+    displayedObject
+    
+    --------------------------------------------------
+    -- FLY TO PLAYER
+    --------------------------------------------------
+    
+    if object
+        and object.Parent then
+        
+        local character =
+        player.Character
+        
+        local root =
+        character
+        and character:FindFirstChild(
+        "HumanoidRootPart"
+        )
+        
+        if root then
+            
+            local targetCFrame =
+            root.CFrame
+            * CFrame.new(
+            0,
+            1.5,
+            -2
+            )
+            
+            local flyTween =
+            TweenService:Create(
+            object,
+            TweenInfo.new(
+            0.35,
+            Enum.EasingStyle.Back,
+            Enum.EasingDirection.In
+            ),
+            {
+            CFrame =
+            targetCFrame
+            * CFrame.Angles(
+            0,
+            math.rad(360),
+            0
+            )
+            }
+            )
+            
+            flyTween:Play()
+            flyTween.Completed:Wait()
+            
+        end
+    end
+    
+    --------------------------------------------------
+    -- GIVE TOOL
+    --------------------------------------------------
+    
+    local backpack =
+    player:FindFirstChildOfClass(
+    "Backpack"
+    )
+    
+    if backpack then
+        
+        toolToGive.Parent =
+        backpack
+        
+    else
+        
+        toolToGive:Destroy()
+        
+    end
+    
+    --------------------------------------------------
+    -- SUCCESS MESSAGE
+    --------------------------------------------------
+    
+    showNotification(
+    player,
+    "You successfully bought a block!"
+    )
+    
+    --------------------------------------------------
+    -- CLEAR DISPLAY
+    --------------------------------------------------
+    
+    clearDisplay()
+    
+    currentTool = nil
+    currentRarity = nil
+    
+    busy = false
+end
+ 
+--------------------------------------------------
+-- SKIP
+--------------------------------------------------
+ 
+local function doSkip()
+    
+    if rolling or busy then
+        return
+    end
+    
+    if not currentTool then
+        return
+    end
+    
+    busy = true
+    
+    task.spawn(function()
+        pressButton(skipPart)
+    end)
+    
+    playSound(
+    TAP_SOUND_ID,
+    0.35,
+    1,
+    false
+    )
+    
+    local object =
+    displayedObject
+    
+    if object
+        and object.Parent then
+        
+        local disappearTween =
+        TweenService:Create(
+        object,
+        TweenInfo.new(
+        0.3,
+        Enum.EasingStyle.Back,
+        Enum.EasingDirection.In
+        ),
+        {
+        CFrame =
+        object.CFrame
+        * CFrame.new(
+        0,
+        1.5,
+        0
+        )
+        * CFrame.Angles(
+        math.rad(180),
+        math.rad(180),
+        0
+        ),
+        
+        Transparency = 1
+        }
+        )
+        
+        disappearTween:Play()
+        disappearTween.Completed:Wait()
+        
+    end
+    
+    clearDisplay()
+    
+    currentTool = nil
+    currentRarity = nil
+    
+    busy = false
+end
+ 
+--------------------------------------------------
+-- CONNECTIONS
+--------------------------------------------------
+ 
+rollClick.MouseClick:Connect(function(player)
+    
+    doRoll()
+    
+end)
+ 
+buyClick.MouseClick:Connect(function(player)
+    
+    doBuy(player)
+    
+end)
+ 
+skipClick.MouseClick:Connect(function(player)
+    
+    doSkip()
+    
+end)
+ 
+--------------------------------------------------
+-- START
+--------------------------------------------------
+ 
+clearDisplay()
+ 
