@@ -1,0 +1,101 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local cashLabel = script.Parent
+
+--------------------------------------------------
+-- MONEY
+--------------------------------------------------
+
+local leaderstats = player:WaitForChild("leaderstats")
+local money = leaderstats:WaitForChild("Money")
+
+--------------------------------------------------
+-- FORMAT CASH
+--------------------------------------------------
+
+local function formatCash(amount)
+    amount = tonumber(amount) or 0
+    
+    local suffixes = {
+    {1e18, "Qi"},
+    {1e15, "Qa"},
+    {1e12, "T"},
+    {1e9, "B"},
+    {1e6, "M"},
+    {1e3, "K"},
+    }
+    
+    for _, data in ipairs(suffixes) do
+        local value = data[1]
+        local suffix = data[2]
+        
+        if amount >= value then
+            local formatted = amount / value
+            
+            -- Buong number kung walang decimal
+            if formatted >= 100 then
+                return "$" .. string.format("%.0f", formatted) .. suffix
+            elseif formatted >= 10 then
+                return "$" .. string.format("%.1f", formatted) .. suffix
+            else
+                return "$" .. string.format("%.2f", formatted) .. suffix
+            end
+        end
+    end
+    
+    return "$" .. tostring(math.floor(amount))
+end
+
+--------------------------------------------------
+-- UPDATE CASH
+--------------------------------------------------
+
+local function updateCash()
+    cashLabel.Text = formatCash(money.Value)
+end
+
+--------------------------------------------------
+-- START
+--------------------------------------------------
+
+updateCash()
+
+--------------------------------------------------
+-- CASH CHANGE ANIMATION
+--------------------------------------------------
+
+money:GetPropertyChangedSignal("Value"):Connect(function()
+    
+    local oldSize = cashLabel.Size
+    
+    -- Update text
+    updateCash()
+    
+    -- Laki muna
+    local biggerSize = UDim2.new(
+    oldSize.X.Scale,
+    oldSize.X.Offset + 10,
+    oldSize.Y.Scale,
+    oldSize.Y.Offset + 5
+    )
+    
+    cashLabel.Size = biggerSize
+    
+    -- Balik sa normal
+    local tween = TweenService:Create(
+    cashLabel,
+    TweenInfo.new(
+    0.15,
+    Enum.EasingStyle.Back,
+    Enum.EasingDirection.Out
+    ),
+    {
+    Size = oldSize
+    }
+    )
+    
+    tween:Play()
+    
+end)
