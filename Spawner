@@ -1,0 +1,367 @@
+--==================================================
+-- RARITY TOOL SPAWNER
+-- WEIGHTED RARITY CHANCE
+-- BUY ONLY
+-- STARTPART -> ENDPART
+-- Credit: Yuuki
+-- when you make a tut make sure to put a credit
+--==================================================
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local StartPart = workspace:WaitForChild("StartPart")
+local EndPart = workspace:WaitForChild("EndPart")
+
+local Spawner = ReplicatedStorage:WaitForChild("Spawner")
+
+--==================================================
+-- RARITY CHANCES
+--==================================================
+-- Higher number = higher chance
+--
+-- Pwede kang magdagdag ng bagong rarity dito.
+--
+-- Example:
+-- Secret = 1
+-- Mythic = 0.5
+--
+-- Hindi kailangang maging exactly 100 ang total.
+-- Ang system mismo ang magco-convert sa weighted chance.
+
+local RarityChances = {
+	Common = 80,
+	Uncommon = 60,
+	Rare = 40,
+	Epic = 25,
+	Legendary = 10,
+	Divine = 2,
+
+	-- DAGDAG KA NG RARITY DITO
+	Secret = 0.5,
+}
+
+--==================================================
+-- SETTINGS
+--==================================================
+
+local SPAWN_INTERVAL = 3
+local MOVE_TIME = 10
+
+--==================================================
+-- RANDOM RARITY
+--==================================================
+
+local function chooseRarity()
+
+	local totalWeight = 0
+
+	-- Calculate total
+	for rarityName, weight in pairs(RarityChances) do
+
+		if weight > 0 then
+			local folder = Spawner:FindFirstChild(rarityName)
+
+			if folder and folder:IsA("Folder") then
+				totalWeight += weight
+			end
+		end
+
+	end
+
+	if totalWeight <= 0 then
+		warn("Walang valid rarity!")
+		return nil
+	end
+
+	-- Random number
+	local randomNumber = math.random() * totalWeight
+
+	local currentWeight = 0
+
+	for rarityName, weight in pairs(RarityChances) do
+
+		if weight > 0 then
+
+			local folder = Spawner:FindFirstChild(rarityName)
+
+			if folder and folder:IsA("Folder") then
+
+				currentWeight += weight
+
+				if randomNumber <= currentWeight then
+					return folder
+				end
+
+			end
+
+		end
+
+	end
+
+	return nil
+end
+
+--==================================================
+-- RANDOM TOOL FROM RARITY
+--==================================================
+
+local function chooseTool(rarityFolder)
+
+	local tools = {}
+
+	for _, item in ipairs(rarityFolder:GetChildren()) do
+
+		if item:IsA("Tool") then
+			table.insert(tools, item)
+		end
+
+	end
+
+	if #tools == 0 then
+		return nil
+	end
+
+	return tools[math.random(1, #tools)]
+end
+
+--==================================================
+-- GET PRICE
+--==================================================
+
+local function getPrice(tool)
+
+	local price = tool:FindFirstChild("Price")
+
+	if price and price:IsA("IntValue") then
+		return price.Value
+	end
+
+	return 0
+end
+
+--==================================================
+-- BUY PROMPT
+--==================================================
+
+local function setupBuyPrompt(tool)
+
+	local handle = tool:FindFirstChild("Handle")
+
+	if not handle then
+		warn("Tool has no Handle:", tool.Name)
+		return false
+	end
+
+	--==============================================
+	-- BUY ONLY
+	--==============================================
+
+	handle.Anchored = true
+	handle.CanCollide = false
+	handle.CanTouch = false
+
+	--==============================================
+	-- PROMPT
+	--==============================================
+
+	local prompt = Instance.new("ProximityPrompt")
+
+	prompt.Name = "BuyPrompt"
+	prompt.ActionText = "Buy"
+	prompt.ObjectText = tool.Name .. " - $" .. getPrice(tool)
+
+	prompt.HoldDuration = 0.5
+	prompt.MaxActivationDistance = 10
+	prompt.RequiresLineOfSight = false
+
+	prompt.Parent = handle
+
+	--==============================================
+	-- BUY
+	--==============================================
+
+	prompt.Triggered:Connect(function(player)
+
+		-- Check kung existing pa
+		if not tool or not tool.Parent then
+			return
+		end
+
+		local leaderstats = player:FindFirstChild("leaderstats")
+
+		if not leaderstats then
+			return
+		end
+
+		local money = leaderstats:FindFirstChild("Money")
+
+		if not money then
+			return
+		end
+
+		local price = getPrice(tool)
+
+		if price <= 0 then
+			warn("Invalid Price:", tool.Name)
+			return
+		end
+
+		--==========================================
+		-- CHECK MONEY
+		--==========================================
+
+		if money.Value < price then
+			return
+		end
+
+		--==========================================
+		-- PAY
+		--==========================================
+
+		money.Value -= price
+
+		--==========================================
+		-- GIVE TOOL
+		--==========================================
+
+		local backpack = player:FindFirstChild("Backpack")
+
+		if backpack then
+
+			local boughtTool = tool:Clone()
+
+			-- Remove spawned BuyPrompt
+			local boughtHandle = boughtTool:FindFirstChild("Handle")
+
+			if boughtHandle then
+
+				boughtHandle.Anchored = false
+				boughtHandle.CanTouch = true
+				boughtHandle.CanCollide = true
+
+				local boughtPrompt =
+					boughtHandle:FindFirstChild("BuyPrompt")
+
+				if boughtPrompt then
+					boughtPrompt:Destroy()
+				end
+
+			end
+
+			boughtTool.Parent = backpack
+
+		end
+
+		--==========================================
+		-- REMOVE SPAWNED TOOL
+		--==========================================
+
+		tool:Destroy()
+
+	end)
+
+	return true
+end
+
+--==================================================
+-- SPAWN TOOL
+--==================================================
+
+local function spawnTool()
+
+	-- Choose rarity
+	local rarityFolder = chooseRarity()
+
+	if not rarityFolder then
+		return
+	end
+
+	-- Choose tool
+	local originalTool = chooseTool(rarityFolder)
+
+	if not originalTool then
+		warn(
+			"No Tools inside rarity folder:",
+			rarityFolder.Name
+		)
+
+		return
+	end
+
+	-- Clone
+	local tool = originalTool:Clone()
+
+	tool.Parent = workspace
+
+	-- Setup
+	local success = setupBuyPrompt(tool)
+
+	if not success then
+		tool:Destroy()
+		return
+	end
+
+	local handle = tool:FindFirstChild("Handle")
+
+	--==============================================
+	-- START POSITION
+	--==============================================
+
+	handle.CFrame = StartPart.CFrame
+
+	--==============================================
+	-- MOVE
+	--==============================================
+
+	local tweenInfo = TweenInfo.new(
+		MOVE_TIME,
+		Enum.EasingStyle.Linear,
+		Enum.EasingDirection.Out
+	)
+
+	local tween = TweenService:Create(
+		handle,
+		tweenInfo,
+		{
+			CFrame = EndPart.CFrame
+		}
+	)
+
+	tween:Play()
+
+	--==============================================
+	-- END
+	--==============================================
+
+	tween.Completed:Connect(function()
+
+		if tool and tool.Parent then
+			tool:Destroy()
+		end
+
+	end)
+
+	-- Debug
+	print(
+		"[SPAWN]",
+		tool.Name,
+		"Rarity:",
+		rarityFolder.Name,
+		"Chance Weight:",
+		RarityChances[rarityFolder.Name]
+	)
+
+end
+
+--==================================================
+-- SPAWN LOOP
+--==================================================
+
+while true do
+
+	spawnTool()
+
+	task.wait(SPAWN_INTERVAL)
+
+end
